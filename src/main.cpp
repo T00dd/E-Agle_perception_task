@@ -5,6 +5,7 @@
 #include <pcl/console/parse.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
 #include <iostream>
 #include <thread>
 
@@ -39,40 +40,59 @@ int main() {
         //std::this_thread::sleep_for(100ms);
     }*/
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_z(new pcl::PointCloud<pcl::PointXYZ>);
 
-    pcl::PassThrough<pcl::PointXYZ> pass;
-    pass.setInputCloud(cloud);
+    pcl::PassThrough<pcl::PointXYZ> pt;
+    pt.setInputCloud(cloud);
 
     //filtro su asse z:
-    pass.setFilterFieldName("z");
-    pass.setFilterLimits(-1, 1.5);
-    pass.filter(*filtered_cloud);
+    pt.setFilterFieldName("z");
+    pt.setFilterLimits(-1, 1);
+    pt.filter(*cloud_z);
 
     //rimuovere punti isolati:
-    pcl::PointCloud<pcl::PointXYZ>::Ptr clean_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     
-    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> rem;
-    rem.setInputCloud(filtered_cloud);
-    rem.setMeanK(50);
-    rem.setStddevMulThresh(1.5);
-    rem.filter(*clean_cloud);
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+    sor.setInputCloud(cloud_z);
+    sor.setMeanK(50);
+    sor.setStddevMulThresh(1);
+    sor.filter(*filtered_cloud);
 
     pcl::visualization::PCLVisualizer::Ptr viewer_filtered(new pcl::visualization::PCLVisualizer("Filtered Cloud"));
 
-    viewer_filtered->addPointCloud<pcl::PointXYZ>(clean_cloud, "clean cloud");
+    viewer_filtered->addPointCloud<pcl::PointXYZ>(filtered_cloud, "clean cloud");
     viewer_filtered->setCameraPosition(
     -5, 0, 0,     // posizione camera nello spazio
     0, 0, 0,     // punto che la camera guarda
     0, 0, 1      // l'asse che è sopra (quindi l'asse z)
     );
 
-    while (!viewer_filtered->wasStopped() && !viewer->wasStopped()) {
+    
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr clusters_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+    pcl::VoxelGrid<pcl::PointXYZ> vg;
+    vg.setInputCloud(filtered_cloud);
+    vg.setLeafSize(0.05f, 0.05f, 0.05f);
+    vg.filter(*clusters_cloud);
+
+    pcl::visualization::PCLVisualizer::Ptr viewer_clusters(new pcl::visualization::PCLVisualizer("Cluster Cloud"));
+
+    viewer_clusters->addPointCloud<pcl::PointXYZ>(clusters_cloud, "clean cloud");
+    viewer_clusters->setCameraPosition(
+    -5, 0, 0,     // posizione camera nello spazio
+    0, 0, 0,     // punto che la camera guarda
+    0, 0, 1      // l'asse che è sopra (quindi l'asse z)
+    );
+
+    cout<<"PointCloud dopo il filtraggio: " <<clusters_cloud->width * clusters_cloud->height <<" punti.\n";
+    
+    while (!viewer_filtered->wasStopped() && !viewer->wasStopped() && !viewer_clusters->wasStopped()){
         viewer->spinOnce(100);
         viewer_filtered->spinOnce(100);
+        viewer_clusters->spinOnce(100);
     }
-
-
 
     return 0;
 }

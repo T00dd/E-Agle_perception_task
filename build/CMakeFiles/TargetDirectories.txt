@@ -1,3 +1,0 @@
-/home/t0dd/Scrivania/progetto_eagle/build/CMakeFiles/main.dir
-/home/t0dd/Scrivania/progetto_eagle/build/CMakeFiles/edit_cache.dir
-/home/t0dd/Scrivania/progetto_eagle/build/CMakeFiles/rebuild_cache.dir
