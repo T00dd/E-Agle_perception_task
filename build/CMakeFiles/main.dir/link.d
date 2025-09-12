@@ -119,13 +119,20 @@ main: \
   /usr/lib/gcc/x86_64-linux-gnu/14/libgcc.a \
   /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o \
   /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o \
+  /usr/lib/x86_64-linux-gnu/libpcl_ml.so \
+  /usr/lib/x86_64-linux-gnu/libpcl_features.so \
+  /usr/lib/x86_64-linux-gnu/libpcl_sample_consensus.so \
+  /usr/lib/x86_64-linux-gnu/libpcl_search.so \
+  /usr/lib/gcc/x86_64-linux-gnu/14/libgomp.so \
+  /lib/x86_64-linux-gnu/libm.so.6 \
+  /usr/lib/x86_64-linux-gnu/liblz4.so \
+  /usr/lib/x86_64-linux-gnu/libpcl_kdtree.so \
+  /usr/lib/x86_64-linux-gnu/libpcl_octree.so \
   /usr/lib/x86_64-linux-gnu/libvtkChartsCore-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkIOPLY-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkRenderingLOD-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkViewsContext2D-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkRenderingContextOpenGL2-9.3.so.9.3 \
-  /usr/lib/x86_64-linux-gnu/libpcl_kdtree.so \
-  /lib/x86_64-linux-gnu/libm.so.6 \
   /usr/lib/x86_64-linux-gnu/libvtkInteractionWidgets-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkFiltersModeling-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkInteractionStyle-9.3.so.9.3 \
@@ -153,7 +160,6 @@ main: \
   /usr/lib/x86_64-linux-gnu/libOpenNI2.so \
   /usr/lib/libOpenNI.so \
   /usr/lib/x86_64-linux-gnu/libpcap.so \
-  /usr/lib/gcc/x86_64-linux-gnu/14/libgomp.so \
   /usr/lib/x86_64-linux-gnu/libvtkIOLegacy-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkIOCore-9.3.so.9.3 \
   /lib64/ld-linux-x86-64.so.2 \
@@ -164,11 +170,11 @@ main: \
   /usr/lib/x86_64-linux-gnu/libvtkpugixml-9.3.so.1 \
   /usr/lib/x86_64-linux-gnu/libvtkkissfft-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libvtkloguru-9.3.so.1 \
+  /lib/x86_64-linux-gnu/libxxhash.so.0 \
   /usr/lib/x86_64-linux-gnu/libvtkInfovisCore-9.3.so.1 \
   /usr/lib/x86_64-linux-gnu/libvtkViewsCore-9.3.so.9.3 \
   /usr/lib/x86_64-linux-gnu/libGLEW.so \
   /usr/lib/x86_64-linux-gnu/libOpenGL.so.0 \
-  /usr/lib/x86_64-linux-gnu/liblz4.so \
   /usr/lib/x86_64-linux-gnu/libvtkFiltersTexture-9.3.so.1 \
   /usr/lib/x86_64-linux-gnu/libvtkImagingGeneral-9.3.so.1 \
   /usr/lib/x86_64-linux-gnu/libvtkFiltersHybrid-9.3.so.1 \
@@ -198,7 +204,6 @@ main: \
   /usr/lib/x86_64-linux-gnu/libdouble-conversion.so.3 \
   /lib/x86_64-linux-gnu/libGL.so.1 \
   /lib/x86_64-linux-gnu/libGLdispatch.so.0 \
-  /lib/x86_64-linux-gnu/libxxhash.so.0 \
   /usr/lib/x86_64-linux-gnu/libvtkIOXML-9.3.so.1 \
   /usr/lib/x86_64-linux-gnu/libvtkParallelMPI-9.3.so.1 \
   /lib/x86_64-linux-gnu/libpsm2.so.2 \
@@ -474,6 +479,24 @@ CMakeFiles/main.dir/src/main.cpp.o:
 
 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o:
 
+/usr/lib/x86_64-linux-gnu/libpcl_ml.so:
+
+/usr/lib/x86_64-linux-gnu/libpcl_features.so:
+
+/usr/lib/x86_64-linux-gnu/libpcl_sample_consensus.so:
+
+/usr/lib/x86_64-linux-gnu/libpcl_search.so:
+
+/usr/lib/gcc/x86_64-linux-gnu/14/libgomp.so:
+
+/lib/x86_64-linux-gnu/libm.so.6:
+
+/usr/lib/x86_64-linux-gnu/liblz4.so:
+
+/usr/lib/x86_64-linux-gnu/libpcl_kdtree.so:
+
+/usr/lib/x86_64-linux-gnu/libpcl_octree.so:
+
 /usr/lib/x86_64-linux-gnu/libvtkChartsCore-9.3.so.9.3:
 
 /usr/lib/x86_64-linux-gnu/libvtkIOPLY-9.3.so.9.3:
@@ -483,10 +506,6 @@ CMakeFiles/main.dir/src/main.cpp.o:
 /usr/lib/x86_64-linux-gnu/libvtkViewsContext2D-9.3.so.9.3:
 
 /usr/lib/x86_64-linux-gnu/libvtkRenderingContextOpenGL2-9.3.so.9.3:
-
-/usr/lib/x86_64-linux-gnu/libpcl_kdtree.so:
-
-/lib/x86_64-linux-gnu/libm.so.6:
 
 /usr/lib/x86_64-linux-gnu/libvtkInteractionWidgets-9.3.so.9.3:
 
@@ -542,8 +561,6 @@ CMakeFiles/main.dir/src/main.cpp.o:
 
 /usr/lib/x86_64-linux-gnu/libpcap.so:
 
-/usr/lib/gcc/x86_64-linux-gnu/14/libgomp.so:
-
 /usr/lib/x86_64-linux-gnu/libvtkIOLegacy-9.3.so.9.3:
 
 /usr/lib/x86_64-linux-gnu/libvtkIOCore-9.3.so.9.3:
@@ -564,6 +581,8 @@ CMakeFiles/main.dir/src/main.cpp.o:
 
 /usr/lib/x86_64-linux-gnu/libvtkloguru-9.3.so.1:
 
+/lib/x86_64-linux-gnu/libxxhash.so.0:
+
 /usr/lib/x86_64-linux-gnu/libvtkInfovisCore-9.3.so.1:
 
 /usr/lib/x86_64-linux-gnu/libvtkViewsCore-9.3.so.9.3:
@@ -571,8 +590,6 @@ CMakeFiles/main.dir/src/main.cpp.o:
 /usr/lib/x86_64-linux-gnu/libGLEW.so:
 
 /usr/lib/x86_64-linux-gnu/libOpenGL.so.0:
-
-/usr/lib/x86_64-linux-gnu/liblz4.so:
 
 /usr/lib/x86_64-linux-gnu/libvtkFiltersTexture-9.3.so.1:
 
@@ -631,8 +648,6 @@ CMakeFiles/main.dir/src/main.cpp.o:
 /lib/x86_64-linux-gnu/libGL.so.1:
 
 /lib/x86_64-linux-gnu/libGLdispatch.so.0:
-
-/lib/x86_64-linux-gnu/libxxhash.so.0:
 
 /usr/lib/x86_64-linux-gnu/libvtkIOXML-9.3.so.1:
 

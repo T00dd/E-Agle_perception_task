@@ -1468,6 +1468,10 @@ CMakeFiles/main.dir/src/main.cpp.o: /home/t0dd/Scrivania/progetto_eagle/src/main
   /usr/include/pcl-1.15/pcl/features/feature.h \
   /usr/include/pcl-1.15/pcl/features/impl/feature.hpp \
   /usr/include/pcl-1.15/pcl/features/normal_3d.h \
+  /usr/include/pcl-1.15/pcl/filters/filter.h \
+  /usr/include/pcl-1.15/pcl/filters/filter_indices.h \
+  /usr/include/pcl-1.15/pcl/filters/passthrough.h \
+  /usr/include/pcl-1.15/pcl/filters/statistical_outlier_removal.h \
   /usr/include/pcl-1.15/pcl/for_each_type.h \
   /usr/include/pcl-1.15/pcl/impl/cloud_iterator.hpp \
   /usr/include/pcl-1.15/pcl/impl/point_types.hpp \
@@ -2525,6 +2529,8 @@ CMakeFiles/main.dir/src/main.cpp.o:
 
 /usr/include/pcl-1.15/pcl/for_each_type.h:
 
+/usr/include/pcl-1.15/pcl/filters/filter.h:
+
 /usr/include/pcl-1.15/pcl/exceptions.h:
 
 /usr/include/pcl-1.15/pcl/correspondence.h:
@@ -2636,6 +2642,8 @@ CMakeFiles/main.dir/src/main.cpp.o:
 /usr/include/eigen3/Eigen/src/LU/PartialPivLU.h:
 
 /usr/include/eigen3/Eigen/src/LU/InverseImpl.h:
+
+/usr/include/pcl-1.15/pcl/filters/statistical_outlier_removal.h:
 
 /usr/include/eigen3/Eigen/src/LU/FullPivLU.h:
 
@@ -3926,6 +3934,8 @@ CMakeFiles/main.dir/src/main.cpp.o:
 /usr/include/boost/fusion/mpl/insert.hpp:
 
 /usr/include/x86_64-linux-gnu/c++/14/bits/cpu_defines.h:
+
+/usr/include/pcl-1.15/pcl/filters/filter_indices.h:
 
 /usr/include/boost/mpl/void_fwd.hpp:
 
@@ -5874,6 +5884,8 @@ CMakeFiles/main.dir/src/main.cpp.o:
 /usr/include/c++/14/bits/allocated_ptr.h:
 
 /usr/include/c++/14/bits/allocator.h:
+
+/usr/include/pcl-1.15/pcl/filters/passthrough.h:
 
 /usr/include/c++/14/bits/basic_string.tcc:
 

@@ -1673,8 +1673,12 @@ CMakeFiles/main.dir/src/main.cpp.o: \
  /usr/include/vtk-9.3/vtkPolygon.h \
  /usr/include/vtk-9.3/vtkUnstructuredGrid.h \
  /usr/include/vtk-9.3/vtkUnstructuredGridBase.h \
- /usr/include/pcl-1.15/pcl/console/parse.h /usr/include/c++/14/thread \
- /usr/include/c++/14/bits/std_thread.h \
+ /usr/include/pcl-1.15/pcl/console/parse.h \
+ /usr/include/pcl-1.15/pcl/filters/passthrough.h \
+ /usr/include/pcl-1.15/pcl/filters/filter_indices.h \
+ /usr/include/pcl-1.15/pcl/filters/filter.h \
+ /usr/include/pcl-1.15/pcl/filters/statistical_outlier_removal.h \
+ /usr/include/c++/14/thread /usr/include/c++/14/bits/std_thread.h \
  /usr/include/c++/14/bits/this_thread_sleep.h \
  /usr/include/c++/14/bits/chrono.h /usr/include/c++/14/ratio \
  /usr/include/c++/14/bits/parse_numbers.h
