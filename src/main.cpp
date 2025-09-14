@@ -8,6 +8,9 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <pcl/segmentation/extract_clusters.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/filters/extract_indices.h>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -15,35 +18,34 @@
 using namespace std;
 
 int main() {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
-    if (pcl::io::loadPCDFile<pcl::PointXYZ>("../data/cones.pcd", *cloud) == -1) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+    if (pcl::io::loadPCDFile<pcl::PointXYZ>("../data/cones.pcd", *raw_cloud) == -1) {
         PCL_ERROR("File mancante o formato file sbagliato\n");
         return -1;
     }
 
-    cout <<"Nuvola caricata: " <<cloud->width * cloud->height <<" punti." <<endl;
+    cout <<"Nuvola caricata: " <<raw_cloud->width * raw_cloud->height <<" punti." <<endl;
 
     pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL"));
-    viewer->addPointCloud<pcl::PointXYZ>(cloud, "sample cloud");
+    viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, "sample cloud");
     
-    pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(cloud, "z");
-    viewer->addPointCloud<pcl::PointXYZ>(cloud, color_handler, "cloud_z");
+    pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(raw_cloud, "z");
+    viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, color_handler, "cloud_z");
     viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "cloud_z");
     viewer->setCameraPosition(
     -5, 0, 0,     
     0, 0, 0,     
     0, 0, 1      
     );
-    
-
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_z(new pcl::PointCloud<pcl::PointXYZ>);
 
     pcl::PassThrough<pcl::PointXYZ> pt;
-    pt.setInputCloud(cloud);
+    pt.setInputCloud(raw_cloud);
     pt.setFilterFieldName("z");
-    pt.setFilterLimits(-1, 1);
+    pt.setFilterLimits(-1, 1.5);
     pt.filter(*cloud_z);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -70,19 +72,50 @@ int main() {
     vg.setLeafSize(0.02f, 0.02f, 0.02f);
     vg.filter(*clusters_cloud);
 
-    pcl::visualization::PCLVisualizer::Ptr viewer_clusters(new pcl::visualization::PCLVisualizer("Cluster Cloud"));
+    cout<<"PointCloud dopo il filtraggio: " <<clusters_cloud->size() <<" punti.\n";
 
-    viewer_clusters->addPointCloud<pcl::PointXYZ>(clusters_cloud, "clean cloud");
+    pcl::PointCloud<pcl::PointXYZ>::Ptr no_floor(new pcl::PointCloud<pcl::PointXYZ>);
+    no_floor = clusters_cloud;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr temp(new pcl::PointCloud<pcl::PointXYZ>);
+    int num_piani = 0;
+    
+    for(int i=0; i<2; i++){
+        pcl::SACSegmentation<pcl::PointXYZ> seg;
+        pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+        pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+
+        seg.setOptimizeCoefficients(true);
+        seg.setModelType(pcl::SACMODEL_PLANE);
+        seg.setMethodType(pcl::SAC_RANSAC);
+        seg.setDistanceThreshold(0.05);
+        seg.setInputCloud(no_floor);
+        seg.segment(*inliers, *coefficients);
+
+        if(!inliers->indices.empty()){
+            cout<<"Piano trovato\n" <<"Punti del piano rimossi:" <<inliers->indices.size() <<endl;
+        }
+
+        pcl::ExtractIndices<pcl::PointXYZ> extract;
+
+        extract.setInputCloud(no_floor);
+        extract.setIndices(inliers);
+        extract.setNegative(true);
+        extract.filter(*temp);
+        no_floor.swap(temp);
+
+    }
+    
+    pcl::visualization::PCLVisualizer::Ptr viewer_clusters(new pcl::visualization::PCLVisualizer("Cloud without plane"));
+
+    viewer_clusters->addPointCloud<pcl::PointXYZ>(no_floor, "clean cloud");
     viewer_clusters->setCameraPosition(
     -5, 0, 0,    
     0, 0, 0,     
     0, 0, 1     
-    );
-
-    cout<<"PointCloud dopo il filtraggio: " <<clusters_cloud->size() <<" punti.\n";
+    );     
 
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
-    tree->setInputCloud(clusters_cloud);
+    tree->setInputCloud(no_floor);
 
     std::vector<pcl::PointIndices> cluster_vector;
     pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
@@ -90,7 +123,7 @@ int main() {
     ec.setMinClusterSize(30);
     ec.setMaxClusterSize(2000);
     ec.setSearchMethod(tree);
-    ec.setInputCloud(clusters_cloud);
+    ec.setInputCloud(no_floor);
     ec.extract(cluster_vector);
 
     std::cout<<"Cluster trovati: " <<cluster_vector.size() <<endl;
