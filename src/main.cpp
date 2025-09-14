@@ -19,6 +19,7 @@ using namespace std;
 
 int main() {
 
+    //visualizzazione cones.pcd
     pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
     if (pcl::io::loadPCDFile<pcl::PointXYZ>("../data/cones.pcd", *raw_cloud) == -1) {
@@ -40,6 +41,7 @@ int main() {
     0, 0, 1      
     );
 
+    //filtro punti asse z
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_z(new pcl::PointCloud<pcl::PointXYZ>);
 
     pcl::PassThrough<pcl::PointXYZ> pt;
@@ -48,6 +50,7 @@ int main() {
     pt.setFilterLimits(-1, 1.5);
     pt.filter(*cloud_z);
 
+    //filtro statistical outlier removal
     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
     pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
@@ -56,6 +59,7 @@ int main() {
     sor.setStddevMulThresh(1);
     sor.filter(*filtered_cloud);
 
+    //visualizzazione nuvola dopo filtro SOR
     pcl::visualization::PCLVisualizer::Ptr viewer_filtered(new pcl::visualization::PCLVisualizer("Filtered Cloud"));
 
     viewer_filtered->addPointCloud<pcl::PointXYZ>(filtered_cloud, "clean cloud");
@@ -65,6 +69,7 @@ int main() {
     0, 0, 1      // l'asse che è sopra (quindi l'asse z)
     );
 
+    //semplificazione della nuvola rimuovendo punti con VoxelGrid
     pcl::PointCloud<pcl::PointXYZ>::Ptr clusters_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     
     pcl::VoxelGrid<pcl::PointXYZ> vg;
@@ -74,12 +79,13 @@ int main() {
 
     cout<<"PointCloud dopo il filtraggio: " <<clusters_cloud->size() <<" punti.\n";
 
+    //rimozione di piani (pavimento e muro) per evitare errori nel clustering e classificazione
     pcl::PointCloud<pcl::PointXYZ>::Ptr no_floor(new pcl::PointCloud<pcl::PointXYZ>);
     no_floor = clusters_cloud;
     pcl::PointCloud<pcl::PointXYZ>::Ptr temp(new pcl::PointCloud<pcl::PointXYZ>);
     int num_piani = 0;
     
-    for(int i=0; i<2; i++){
+    for(int i=0; i<2; i++){ //toglie muro e pavimento
         pcl::SACSegmentation<pcl::PointXYZ> seg;
         pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
         pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
@@ -105,15 +111,17 @@ int main() {
 
     }
     
-    pcl::visualization::PCLVisualizer::Ptr viewer_clusters(new pcl::visualization::PCLVisualizer("Cloud without plane"));
+    //visualizzazione nuvola dopo rimozione dei piani
+    pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without plane"));
 
-    viewer_clusters->addPointCloud<pcl::PointXYZ>(no_floor, "clean cloud");
-    viewer_clusters->setCameraPosition(
+    viewer_no_floor->addPointCloud<pcl::PointXYZ>(no_floor, "clean cloud");
+    viewer_no_floor->setCameraPosition(
     -5, 0, 0,    
     0, 0, 0,     
     0, 0, 1     
     );     
 
+    //divisione dei cluster per preparare la classificazione
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
     tree->setInputCloud(no_floor);
 
@@ -128,10 +136,12 @@ int main() {
 
     std::cout<<"Cluster trovati: " <<cluster_vector.size() <<endl;
 
-    while (!viewer_filtered->wasStopped() && !viewer->wasStopped() && !viewer_clusters->wasStopped()){
+
+    //visualizzazione delle nuvole
+    while (!viewer_filtered->wasStopped() && !viewer->wasStopped() && !viewer_no_floor->wasStopped()){
         viewer->spinOnce(100);
         viewer_filtered->spinOnce(100);
-        viewer_clusters->spinOnce(100);
+        viewer_no_floor->spinOnce(100);
     }
 
     return 0;
