@@ -11,6 +11,8 @@
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/sample_consensus/sac_model_cone.h>
+#include <pcl/common/common.h>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -29,7 +31,7 @@ int main() {
 
     cout <<"Nuvola caricata: " <<raw_cloud->width * raw_cloud->height <<" punti." <<endl;
 
-    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL"));
+    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
     viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, "sample cloud");
     
     pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(raw_cloud, "z");
@@ -47,7 +49,7 @@ int main() {
     pcl::PassThrough<pcl::PointXYZ> pt;
     pt.setInputCloud(raw_cloud);
     pt.setFilterFieldName("z");
-    pt.setFilterLimits(-1, 1.5);
+    pt.setFilterLimits(-1, 1);
     pt.filter(*cloud_z);
 
     //filtro statistical outlier removal
@@ -56,11 +58,11 @@ int main() {
     pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
     sor.setInputCloud(cloud_z);
     sor.setMeanK(50);
-    sor.setStddevMulThresh(1);
+    sor.setStddevMulThresh(1.5);
     sor.filter(*filtered_cloud);
 
     //visualizzazione nuvola dopo filtro SOR
-    pcl::visualization::PCLVisualizer::Ptr viewer_filtered(new pcl::visualization::PCLVisualizer("Filtered Cloud"));
+    pcl::visualization::PCLVisualizer::Ptr viewer_filtered(new pcl::visualization::PCLVisualizer("cloud dopo filtro z e outlier removal"));
 
     viewer_filtered->addPointCloud<pcl::PointXYZ>(filtered_cloud, "clean cloud");
     viewer_filtered->setCameraPosition(
@@ -74,14 +76,14 @@ int main() {
     
     pcl::VoxelGrid<pcl::PointXYZ> vg;
     vg.setInputCloud(filtered_cloud);
-    vg.setLeafSize(0.02f, 0.02f, 0.02f);
+    vg.setLeafSize(0.01f, 0.01f, 0.01f);
     vg.filter(*clusters_cloud);
 
     cout<<"PointCloud dopo il filtraggio: " <<clusters_cloud->size() <<" punti.\n";
 
     //rimozione di piani (pavimento e muro) per evitare errori nel clustering e classificazione
     pcl::PointCloud<pcl::PointXYZ>::Ptr no_floor(new pcl::PointCloud<pcl::PointXYZ>);
-    no_floor = clusters_cloud;
+    no_floor = filtered_cloud;
     pcl::PointCloud<pcl::PointXYZ>::Ptr temp(new pcl::PointCloud<pcl::PointXYZ>);
     int num_piani = 0;
     
@@ -112,7 +114,7 @@ int main() {
     }
     
     //visualizzazione nuvola dopo rimozione dei piani
-    pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without plane"));
+    pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without planes"));
 
     viewer_no_floor->addPointCloud<pcl::PointXYZ>(no_floor, "clean cloud");
     viewer_no_floor->setCameraPosition(
@@ -128,7 +130,7 @@ int main() {
     std::vector<pcl::PointIndices> cluster_vector;
     pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
     ec.setClusterTolerance(0.15);
-    ec.setMinClusterSize(30);
+    ec.setMinClusterSize(15);
     ec.setMaxClusterSize(2000);
     ec.setSearchMethod(tree);
     ec.setInputCloud(no_floor);
@@ -136,12 +138,124 @@ int main() {
 
     std::cout<<"Cluster trovati: " <<cluster_vector.size() <<endl;
 
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+    //parametri di classificazione coni -----DA AGGIUSTARE -------
+    const float min_inlier_ratio = 0.12f;
+    const float distance_threshold = 0.07f;
+    const float normal_radius = 0.08f;
+    //angolo minimo e massimo di apretura per il cono in radianti
+    const float min_opening = 5.0f * M_PI/180;
+    const float max_opening = 35.0f * M_PI/180;
+
+    //classificazione dei cluster
+    for(const auto &indices : cluster_vector){
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZ>);
+        for(int idx : indices.indices){
+            cluster->points.push_back(no_floor->points[idx]);
+        }
+        cluster->width = cluster->points.size();
+        cluster->height = 1;
+        cluster->is_dense = true;
+        
+        //controllo se i cluster hanno almeno 10 ounti se no li escludo e li coloro di rosso 
+        if (cluster->points.size() < 10) {
+            for (const auto &p : cluster->points) {
+                pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                q.r = 255; q.g = 0; q.b = 0;
+                colored_final_cloud->points.push_back(q);
+            }
+            continue;
+        }
+
+        //controllo l'atezza del cluster in modo da escludere a priori cluster troppo alti che non possono essere coni
+        pcl::PointXYZ min_pt, max_pt;
+        pcl::getMinMax3D(*cluster, min_pt, max_pt);
+
+        float height = max_pt.z - min_pt.z;
+        if (height > 0.3f || min_pt.z > -0.3f) {
+            for (const auto &p : cluster->points) {
+                pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                q.r = 255; q.g = 0; q.b = 0;
+                colored_final_cloud->points.push_back(q);
+            }
+            continue; 
+        }
+
+        pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+        pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+        ne.setInputCloud(cluster);
+        pcl::search::KdTree<pcl::PointXYZ>::Ptr ntree(new pcl::search::KdTree<pcl::PointXYZ>());
+        ne.setSearchMethod(ntree);
+        ne.setRadiusSearch(normal_radius);
+        ne.compute(*normals);
+
+        pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> seg;
+        seg.setOptimizeCoefficients(true);
+        seg.setModelType(pcl::SACMODEL_CONE);
+        seg.setMethodType(pcl::SAC_RANSAC);
+        seg.setNormalDistanceWeight(0.05);
+        seg.setMaxIterations(20000);
+        seg.setDistanceThreshold(distance_threshold);
+        seg.setAxis(Eigen::Vector3f(0.0f, 0.0f, 1.0f));
+        seg.setEpsAngle(20.0f * M_PI/180.0f);
+        seg.setInputCloud(cluster);
+        seg.setInputNormals(normals);
+
+        pcl::PointIndices::Ptr inliers_cone(new pcl::PointIndices);
+        pcl::ModelCoefficients::Ptr coeff_cone(new pcl::ModelCoefficients);
+        seg.segment(*inliers_cone, *coeff_cone);
+
+        //classificazione cluster con ransac
+        bool is_cone = false;
+        if (!inliers_cone->indices.empty()){
+
+            float inlier_ratio = static_cast<float>(inliers_cone->indices.size()) / static_cast<float>(cluster->points.size());
+            float opening_angle = -1.0f;
+            if (coeff_cone->values.size() >= 7) opening_angle = coeff_cone->values[6];
+
+            if (inlier_ratio >= min_inlier_ratio && opening_angle > 0.0f && opening_angle >= min_opening && opening_angle <= max_opening)
+            {
+                is_cone = true;
+            }
+        }
+
+        if (is_cone) {
+            for (const auto &p : cluster->points) {
+                pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                q.r = 0; q.g = 255; q.b = 0;
+                colored_final_cloud->points.push_back(q);
+            }
+        }else{
+            for (const auto &p : cluster->points) {
+                pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                q.r = 255; q.g = 0; q.b = 0;
+                colored_final_cloud->points.push_back(q);
+            }
+        }
+
+    }
+
+    colored_final_cloud->width = colored_final_cloud->points.size();
+    colored_final_cloud->height = 1;
+    colored_final_cloud->is_dense = true;
+
+    //visualizzazione nuvola finale con verdi i coni e rossi gli ostacoli
+    pcl::visualization::PCLVisualizer::Ptr final_viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
+    final_viewer->addPointCloud<pcl::PointXYZRGB>(colored_final_cloud, "sample cloud");
+    final_viewer->setCameraPosition(
+    -5, 0, 0,     
+    0, 0, 0,     
+    0, 0, 1      
+    );
 
     //visualizzazione delle nuvole
-    while (!viewer_filtered->wasStopped() && !viewer->wasStopped() && !viewer_no_floor->wasStopped()){
+    while (!viewer_filtered->wasStopped() && !viewer->wasStopped() && !viewer_no_floor->wasStopped() && !final_viewer->wasStopped()){
         viewer->spinOnce(100);
         viewer_filtered->spinOnce(100);
         viewer_no_floor->spinOnce(100);
+        final_viewer->spinOnce(100);
     }
 
     return 0;
