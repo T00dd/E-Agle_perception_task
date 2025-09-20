@@ -12,6 +12,7 @@
     #include <pcl/common/common.h>
     #include <pcl/registration/icp.h>
     #include <iostream>
+    #include <omp.h>
     #include <vector>
 
     using namespace std;
@@ -32,7 +33,11 @@
 
     void odometry(const pcl::PointCloud<pcl::PointXYZ>::Ptr &first, const pcl::PointCloud<pcl::PointXYZ>::Ptr &second, int max_iteration, float max_correspond_distance);
 
+    void order_by_nn(std::vector<Eigen::Vector3f> &pts); 
+
     int main() {
+        
+        cout <<"Numero di thread disponibili: " <<omp_get_max_threads() <<endl;
 
         //visualizzazione cones.pcd
         pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -49,7 +54,7 @@
         
         pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(raw_cloud, "z");
         viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, color_handler, "cloud_z");
-        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "cloud_z");
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud_z");
         viewer->setCameraPosition(
         -5, 0, 0,     
         0, 0, 0,     
@@ -85,17 +90,17 @@
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
         //CLASSIFICAZIONE CLUSTER
-        int cluster_id = 0;
 
         //vettore per salvare i centroidi dei coni rilevati
         vector<Eigen::Vector3f> cone_centers;
 
-        for(const auto &indices : cluster_vector){
+        #pragma omp parallel for
+        for(int i = 0; i<cluster_vector.size(); i++){
 
             //prendo i cluster e li metto in una nuvola
             pcl::PointCloud<pcl::PointXYZ>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZ>);
-            cluster->reserve(indices.indices.size());
-            for (int idx : indices.indices)
+            cluster->reserve(cluster_vector[i].indices.size());
+            for (int idx : cluster_vector[i].indices)
                 cluster->points.push_back(no_planes->points[idx]);
 
             cluster->width = cluster->points.size();
@@ -107,15 +112,21 @@
             pcl::removeNaNFromPointCloud(*cluster, cluster_clean, valid_indices);
             *cluster = cluster_clean;
 
-            cout <<"Cluster #" <<cluster_id++ << "-> punti: " <<cluster->size() <<endl;
+            #pragma omp critical
+            {
+                cout <<"Cluster #" <<i <<" -> punti: " <<cluster->size() <<endl;
+            }
 
             //scarto cluster troppo piccoli
             if (cluster->size() < 20){
-                for (const auto &p : cluster->points){
+                #pragma omp critical
+                {
+                    for (const auto &p : cluster->points){
                     pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
                     colored_final_cloud->points.push_back(q);
+                    }
+                    cout<<"Cluster #" <<i <<" scartato: pochi punti\n";
                 }
-                cout<<"Cluster #" <<cluster_id <<" scartato: pochi punti\n";
                 continue;
             }
            
@@ -129,11 +140,14 @@
 
             //controllo altezza e posizione del cluster (scarto quelli irrealistici)
             if (height <= 0.0f || base_radius <= 0.0f || height > 0.3f || min_pt.z > -0.3f){
-                for (const auto &p : cluster->points){
-                    pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
-                    colored_final_cloud->points.push_back(q);
+                #pragma omp critical
+                {
+                    for (const auto &p : cluster->points){
+                        pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
+                        colored_final_cloud->points.push_back(q);
+                    }
+                    cout<<"Cluster #" <<i <<" scartato: posizione o altezza irrealistici\n";                    
                 }
-                cout<<"Cluster #" <<cluster_id <<" scartato: posizione o altezza irrealistici\n";
                 continue;
             }
 
@@ -143,26 +157,35 @@
             bool is_cone = isConeICP(cluster, maxCorrDist, score_threshold, base_radius); 
 
             if (is_cone) {
-                //coloro il cluster di azzurro se è un cono
-                for (const auto &p : cluster->points) {
-                    pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
-                    q.r = 0; q.g = 200; q.b = 255;
-                    colored_final_cloud->points.push_back(q);
-                }
-
-                //calcolo e salvo il centroide del cluster per il tracciato
                 Eigen::Vector4f c; 
                 pcl::compute3DCentroid(*cluster, c);
-                cone_centers.emplace_back(c[0], c[1], c[2]);
+
+                //coloro il cluster di azzurro se è un cono
+                #pragma omp critical
+                {
+                    for (const auto &p : cluster->points) {
+                        pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                        q.r = 0; q.g = 200; q.b = 255;
+                        colored_final_cloud->points.push_back(q);
+                    }
+
+                    //calcolo e salvo il centroide del cluster per il tracciato
+                    cone_centers.emplace_back(c[0], c[1], c[2]);
+                }
+                
 
             }else{
-                for (const auto &p : cluster->points) {
-                    //coloro di rosso gli ostacoli
-                    pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
-                    q.r = 255; q.g = 0; q.b = 0;
-                    colored_final_cloud->points.push_back(q);
+
+                #pragma omp critical
+                {
+                    for (const auto &p : cluster->points) {
+                        //coloro di rosso gli ostacoli
+                        pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                        q.r = 255; q.g = 0; q.b = 0;
+                        colored_final_cloud->points.push_back(q);
+                    }
+                    cout<<"Cluster #" <<i <<" scartato: non è un cono\n";
                 }
-                cout<<"Cluster #" <<cluster_id <<" scartato: non è un cono\n";
             }
         }
 
@@ -188,53 +211,19 @@
         }
 
         //costruzione percorso (nearest-neighbor ordering)
-        vector<Eigen::Vector3f> right_cones_unordered;
-        vector<Eigen::Vector3f> left_cones_unordered;
+        vector<Eigen::Vector3f> right_cones;
+        vector<Eigen::Vector3f> left_cones;
 
         for(const auto &c : cone_centers){
             if(c.y() <= 0){
-                right_cones_unordered.push_back(c);
+                right_cones.push_back(c);
             }else{
-                left_cones_unordered.push_back(c);
+                left_cones.push_back(c);
             }
         }
 
-        //funzione lambda per ordinare un vettore di punti
-        auto order_by_nn = [](const std::vector<Eigen::Vector3f> &pts) {
-            std::vector<Eigen::Vector3f> ordered;
-            if (pts.empty()) return ordered;
-
-            //trova indice di partenza: min distanza dall'origine
-            int start_idx = 0;
-            float best_d = std::numeric_limits<float>::max();
-            for (size_t i=0;i<pts.size();++i){
-                float d = pts[i].head<2>().squaredNorm();
-                if (d < best_d){ best_d=d; start_idx=(int)i; }
-            }
-
-            std::vector<char> used(pts.size(),0);
-            int current = start_idx;
-            ordered.push_back(pts[current]);
-            used[current] = 1;
-
-            for (size_t step = 1; step < pts.size(); ++step) {
-                float best = std::numeric_limits<float>::max();
-                int idx = -1;
-                for (size_t j = 0; j < pts.size(); ++j) {
-                    if (used[j]) continue;
-                    float d = (pts[j] - pts[current]).head<2>().squaredNorm(); //distanza XY
-                    if (d < best){ best = d; idx = j; }
-                }
-                if (idx == -1) break;
-                current = idx;
-                used[current] = 1;
-                ordered.push_back(pts[current]);
-            }
-            return ordered;
-        };
-
-        auto left_cones = order_by_nn(left_cones_unordered);
-        auto right_cones = order_by_nn(right_cones_unordered);
+        order_by_nn(left_cones);
+        order_by_nn(right_cones);
 
         //visualizzatore percorso
         pcl::visualization::PCLVisualizer::Ptr track_viewer(new pcl::visualization::PCLVisualizer("Track Viewer"));
@@ -514,4 +503,43 @@
             cout<<"ICP has not converged\n";
         }
 
+    }
+
+    void order_by_nn(std::vector<Eigen::Vector3f> &pts) {
+            
+        std::vector<Eigen::Vector3f> ordered;
+        if (pts.empty()) return;
+
+        //trova indice di partenza: min distanza dall'origine
+        int start_idx = 0;
+        float best_d = numeric_limits<float>::max();
+
+        for (size_t i=0;i<pts.size();++i){
+            float d = pts[i].head<2>().squaredNorm();
+            if (d < best_d){ best_d=d; start_idx=(int)i; }
+        }
+
+        vector<char> used(pts.size(),0);
+        int current = start_idx;
+        ordered.push_back(pts[current]);
+        used[current] = 1;
+
+        for (size_t step = 1; step < pts.size(); ++step) {
+            float best = numeric_limits<float>::max();
+            int idx = -1;
+            
+            for (size_t j = 0; j < pts.size(); ++j) {
+                if (used[j]) continue;
+                float d = (pts[j] - pts[current]).head<2>().squaredNorm(); //distanza XY
+                if (d < best){ best = d; idx = j; }
+            }
+            
+            if (idx == -1) break;
+            
+            current = idx;
+            used[current] = 1;
+            ordered.push_back(pts[current]);
+        }
+
+        pts.swap(ordered);
     }
