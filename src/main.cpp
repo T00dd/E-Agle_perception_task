@@ -1,5 +1,3 @@
-    #include <pcl/common/angles.h> 
-    #include <pcl/features/normal_3d.h>
     #include <pcl/io/pcd_io.h>
     #include <pcl/visualization/pcl_visualizer.h>
     #include <pcl/console/parse.h>
@@ -8,29 +6,31 @@
     #include <pcl/filters/voxel_grid.h>
     #include <pcl/search/kdtree.h>
     #include <pcl/segmentation/extract_clusters.h>
-    #include <pcl/segmentation/extract_clusters.h>
     #include <pcl/segmentation/sac_segmentation.h>
     #include <pcl/filters/extract_indices.h>
     #include <pcl/sample_consensus/sac_model_cone.h>
     #include <pcl/common/common.h>
     #include <pcl/registration/icp.h>
     #include <iostream>
-    #include <thread>
     #include <vector>
 
     using namespace std;
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filter_z_axes(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, int min_z, int max_z);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filter_z_axes(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, float min_z, float max_z);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr filter_planes(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, int num_planes, float distant_threshold);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr filter_outlier_removal(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, int meanK, int stddevMulThresh);
 
-    void cluster_extract(vector<pcl::PointIndices> &cluster_vector ,const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float cluster_tolerance, int min_size, int max_size);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr downsampling_voxelgrid(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, float leaf_size);
+
+    void cluster_extraction(vector<pcl::PointIndices> &cluster_vector ,const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float cluster_tolerance, int min_size, int max_size);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr makeConeModel(float height, float radius, int slices);
 
     bool isConeICP(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cluster, double max_corresp, double score_threshold, double base_radius);
+
+    void odometry(const pcl::PointCloud<pcl::PointXYZ>::Ptr &first, const pcl::PointCloud<pcl::PointXYZ>::Ptr &second, int max_iteration, float max_correspond_distance);
 
     int main() {
 
@@ -56,21 +56,11 @@
         0, 0, 1      
         );
 
-        //filtro punti asse z
+        //FILTRO ASSE Z
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_z(new pcl::PointCloud<pcl::PointXYZ>);
         cloud_z = filter_z_axes(raw_cloud, -1, 1);
 
-        //semplificazione della nuvola rimuovendo punti con VoxelGrid
-        // pcl::PointCloud<pcl::PointXYZ>::Ptr clusters_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-        
-        // pcl::VoxelGrid<pcl::PointXYZ> vg;
-        // vg.setInputCloud(cloud_z);
-        // vg.setLeafSize(0.05f, 0.05f, 0.05f);
-        // vg.filter(*clusters_cloud);
-
-        // cout<<"PointCloud dopo il filtraggio: " <<clusters_cloud->size() <<" punti.\n";
-
-        //rimozione di piani (pavimento e muro) per evitare errori nel clustering e classificazione
+        //RIMOZIONE PIANI (pavimento e muro) per evitare errori nel clustering e classificazione
         pcl::PointCloud<pcl::PointXYZ>::Ptr no_planes(new pcl::PointCloud<pcl::PointXYZ>);
         no_planes = filter_planes(cloud_z, 2, 0.05);
 
@@ -88,13 +78,13 @@
         0, 0, 1     
         );     
         
-        //divisione dei cluster per preparare la classificazione
+        //DIVISIONE CLUSTER
         vector<pcl::PointIndices> cluster_vector;
-        cluster_extract(cluster_vector, no_planes, 0.15, 15, 2000);
+        cluster_extraction(cluster_vector, no_planes, 0.15, 15, 2000);
 
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-        //classificazione dei cluster
+        //CLASSIFICAZIONE CLUSTER
         int cluster_id = 0;
 
         //vettore per salvare i centroidi dei coni rilevati
@@ -209,7 +199,7 @@
             }
         }
 
-        //funzione NN per ordinare un vettore di punti
+        //funzione lambda per ordinare un vettore di punti
         auto order_by_nn = [](const std::vector<Eigen::Vector3f> &pts) {
             std::vector<Eigen::Vector3f> ordered;
             if (pts.empty()) return ordered;
@@ -246,49 +236,15 @@
         auto left_cones = order_by_nn(left_cones_unordered);
         auto right_cones = order_by_nn(right_cones_unordered);
 
-        // if (!cone_centers.empty())
-        // {
-        //     // trova l'indice di partenza: cono più vicino all'origine (0,0,0)
-        //     int start_idx = 0;
-        //     float best_d = std::numeric_limits<float>::max();
-        //     for (size_t i = 0; i < cone_centers.size(); ++i) {
-        //         float d = cone_centers[i].norm();
-        //         if (d < best_d) { best_d = d; start_idx = (int)i; }
-                
-        //         if(cone_centers[i].y() <= 0){
-        //             right_cones.reserve(cone_centers.size());
-        //             std::vector<char> used(cone_centers.size(), 0);
-        //             int current = start_idx;
-        //             right_cones.push_back(cone_centers[current]);
-        //             used[current] = 1;
-        //         }else{
-        //             left_cones.reserve(cone_centers.size());
-        //             std::vector<char> used(cone_centers.size(), 0);
-        //             int current = start_idx;
-        //             left_cones.push_back(cone_centers[current]);
-        //             used[current] = 1;
-        //         }
-        //     }   
-
-        //     for (size_t step = 1; step < cone_centers.size(); ++step) {
-        //         float best_dist = std::numeric_limits<float>::max();
-        //         int best_idx = -1;
-        //         for (size_t j = 0; j < cone_centers.size(); ++j) {
-        //             if (used[j]) continue;
-        //             float d = (cone_centers[j] - cone_centers[current]).squaredNorm();
-        //             if (d < best_dist) { best_dist = d; best_idx = (int)j; }
-        //         }
-        //         if (best_idx == -1) break;
-        //         current = best_idx;
-        //         used[current] = 1;
-        //         path.push_back(cone_centers[current]);
-        //     }
-        // }
-
         //visualizzatore percorso
         pcl::visualization::PCLVisualizer::Ptr track_viewer(new pcl::visualization::PCLVisualizer("Track Viewer"));
         track_viewer->setBackgroundColor(0, 0, 0);
         track_viewer->addCoordinateSystem(1.0);   
+        track_viewer->setCameraPosition(
+        -5, 0, 0,     
+        0, 0, 0,     
+        0, 0, 1      
+        );
 
         //bordo destra del tracciato -> VERDE
         for (size_t i = 0; i < right_cones.size(); ++i){
@@ -318,6 +274,42 @@
             }
         }
 
+        //ODOMETRY
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud2(new pcl::PointCloud<pcl::PointXYZ>);
+
+        if (pcl::io::loadPCDFile<pcl::PointXYZ>("../data/first.pcd", *cloud1) == -1 || pcl::io::loadPCDFile<pcl::PointXYZ>("../data/second.pcd", *cloud2) == -1){
+            PCL_ERROR("File mancante o formato file sbagliato\n");
+            return -1;
+        }
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1_filter_z(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud2_filter_z(new pcl::PointCloud<pcl::PointXYZ>);
+
+        cloud1_filter_z = filter_z_axes(cloud1, -1, 1);
+        cloud2_filter_z = filter_z_axes(cloud2, -1, 1);
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1_no_planes(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud2_no_planes(new pcl::PointCloud<pcl::PointXYZ>);
+
+        cloud1_no_planes = filter_planes(cloud1_filter_z, 2, 0.05);
+        cloud2_no_planes = filter_planes(cloud2_filter_z, 2, 0.05);
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1_outlier_rem(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud2_outlier_rem(new pcl::PointCloud<pcl::PointXYZ>);
+
+        cloud1_outlier_rem = filter_outlier_removal(cloud1_no_planes, 80, 0.2);
+        cloud2_outlier_rem = filter_outlier_removal(cloud2_no_planes, 80, 0.2);
+        
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1_downsampled(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud2_downsampled(new pcl::PointCloud<pcl::PointXYZ>);
+
+        cloud1_downsampled = downsampling_voxelgrid(cloud1_outlier_rem, 0.05f);
+        cloud2_downsampled = downsampling_voxelgrid(cloud2_outlier_rem, 0.05f);
+
+        odometry(cloud1_downsampled, cloud2_downsampled, 50, 1);
+
         //visualizzazione delle nuvole
         while (!track_viewer->wasStopped() && !viewer->wasStopped() && !viewer_no_floor->wasStopped() && !cone_viewer->wasStopped()){
             viewer->spinOnce(100);
@@ -330,7 +322,7 @@
     }
 
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr filter_z_axes(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, int min_z, int max_z){ 
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filter_z_axes(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, float min_z, float max_z){ 
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>);
 
@@ -391,7 +383,21 @@
         return filtered;
     }
 
-    void cluster_extract(vector<pcl::PointIndices> &cluster_vector ,const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float cluster_tolerance, int min_size, int max_size){ 
+    pcl::PointCloud<pcl::PointXYZ>::Ptr downsampling_voxelgrid(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, float leaf_size){ 
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>);
+        
+        pcl::VoxelGrid<pcl::PointXYZ> vg;
+        vg.setInputCloud(cloud_unfiltered);
+        vg.setLeafSize(leaf_size, leaf_size, leaf_size);
+        vg.filter(*filtered);
+
+        cout<<"PointCloud dopo il filtraggio: " <<filtered->size() <<" punti.\n";
+
+        return filtered;
+    }
+
+    void cluster_extraction(vector<pcl::PointIndices> &cluster_vector ,const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float cluster_tolerance, int min_size, int max_size){ 
 
         pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
         tree->setInputCloud(cloud);
@@ -485,4 +491,27 @@
         cout <<"ICP fitness score: " <<score <<endl;
 
         return score < score_threshold;
+    }
+
+    void odometry(const pcl::PointCloud<pcl::PointXYZ>::Ptr &first, const pcl::PointCloud<pcl::PointXYZ>::Ptr &second, int max_iteration, float max_correspond_distance){
+
+        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+        icp.setMaximumIterations(max_iteration);
+        icp.setMaxCorrespondenceDistance(max_correspond_distance);
+        icp.setTransformationEpsilon(1e-8);
+        icp.setEuclideanFitnessEpsilon(1e-6);
+        icp.setInputSource(first);
+        icp.setInputTarget(second);
+
+        pcl::PointCloud<pcl::PointXYZ> aligned;
+        icp.align(aligned);
+
+        if(icp.hasConverged()){
+            cout<<"ICP converged! Fitness score: " <<icp.getFitnessScore() <<endl;
+            Eigen::Matrix4f transform = icp.getFinalTransformation();
+            cout <<"Trasformazione stimata (odometria):\n" <<transform <<endl;
+        }else{
+            cout<<"ICP has not converged\n";
+        }
+
     }
