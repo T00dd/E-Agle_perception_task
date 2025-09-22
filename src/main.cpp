@@ -69,23 +69,23 @@
         pcl::PointCloud<pcl::PointXYZ>::Ptr no_planes(new pcl::PointCloud<pcl::PointXYZ>);
         no_planes = filter_planes(cloud_z, 2, 0.05);
 
+        //FILTRO OUTLIER REMOVAL
         pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-        filtered_cloud = filter_outlier_removal(no_planes, 50, 0.2);
+        filtered_cloud = filter_outlier_removal(no_planes, 20, 1);
         
-        
-        //visualizzazione nuvola dopo rimozione dei piani
+        //visualizzazione nuvola dopo pipline
         pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without planes"));
-
-        viewer_no_floor->addPointCloud<pcl::PointXYZ>(no_planes, "clean cloud");
+        viewer_no_floor->addPointCloud<pcl::PointXYZ>(filtered_cloud, "clean cloud");
+        viewer_no_floor->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2.5, "clean cloud");
         viewer_no_floor->setCameraPosition(
         -5, 0, 0,    
         0, 0, 0,     
         0, 0, 1     
-        );     
+        );
         
         //DIVISIONE CLUSTER
         vector<pcl::PointIndices> cluster_vector;
-        cluster_extraction(cluster_vector, no_planes, 0.15, 15, 2000);
+        cluster_extraction(cluster_vector, filtered_cloud, 0.15, 15, 2000);
 
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
@@ -101,7 +101,7 @@
             pcl::PointCloud<pcl::PointXYZ>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZ>);
             cluster->reserve(cluster_vector[i].indices.size());
             for (int idx : cluster_vector[i].indices)
-                cluster->points.push_back(no_planes->points[idx]);
+                cluster->points.push_back(filtered_cloud->points[idx]);
 
             cluster->width = cluster->points.size();
             cluster->height = 1;
@@ -168,8 +168,6 @@
                         q.r = 0; q.g = 200; q.b = 255;
                         colored_final_cloud->points.push_back(q);
                     }
-
-                    //calcolo e salvo il centroide del cluster per il tracciato
                     cone_centers.emplace_back(c[0], c[1], c[2]);
                 }
                 
@@ -179,7 +177,6 @@
                 #pragma omp critical
                 {
                     for (const auto &p : cluster->points) {
-                        //coloro di rosso gli ostacoli
                         pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
                         q.r = 255; q.g = 0; q.b = 0;
                         colored_final_cloud->points.push_back(q);
@@ -196,6 +193,7 @@
         //visualizzazione nuvola finale con verdi i coni e rossi gli ostacoli
         pcl::visualization::PCLVisualizer::Ptr cone_viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
         cone_viewer->addPointCloud<pcl::PointXYZRGB>(colored_final_cloud, "sample cloud");
+        cone_viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2.5, "sample cloud");
         cone_viewer->setCameraPosition(
         -5, 0, 0,     
         0, 0, 0,     
@@ -245,7 +243,7 @@
                 pcl::PointXYZ a(right_cones[i-1].x(), right_cones[i-1].y(), right_cones[i-1].z());
                 pcl::PointXYZ b(right_cones[i].x(),   right_cones[i].y(),   right_cones[i].z());
                 string line_id = "track_right_line_" + to_string(i);
-                track_viewer->addLine(a, b, 0, 1, 0, line_id); // verde
+                track_viewer->addLine(a, b, 0, 1, 0, line_id);
             }
         }
 
@@ -259,7 +257,7 @@
                 pcl::PointXYZ a(left_cones[i-1].x(), left_cones[i-1].y(), left_cones[i-1].z());
                 pcl::PointXYZ b(left_cones[i].x(),   left_cones[i].y(),   left_cones[i].z());
                 string line_id = "track_left_line_" + to_string(i);
-                track_viewer->addLine(a, b, 0, 1, 0, line_id); // verde
+                track_viewer->addLine(a, b, 0, 1, 0, line_id);
             }
         }
 
@@ -330,7 +328,7 @@
         filtered = cloud_unfiltered;
         pcl::PointCloud<pcl::PointXYZ>::Ptr temp(new pcl::PointCloud<pcl::PointXYZ>);
 
-        for(int i=0; i<num_planes; i++){ //toglie muro e pavimento
+        for(int i=0; i<num_planes; i++){
             pcl::SACSegmentation<pcl::PointXYZ> seg;
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
             pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
@@ -403,46 +401,39 @@
         cout<<"Cluster trovati: " <<cluster_vector.size() <<endl;
     }
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr makeConeModel(float height, float radius, int slices){
+    pcl::PointCloud<pcl::PointXYZ>::Ptr makeConeModel(float height, float radius, int slices) {
 
-        float fov_deg = 200.0f;          //angolo visibile dal LiDAR
-        float slope_eps = 0.02f;         //piccola pendenza per evitare superfici piatte
-        auto model = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        model->points.reserve(slices * 50);
+    float fov_deg = 180.0f; //angolo visibile dal LiDAR
+    auto model = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    model->points.reserve(slices * 50);
 
-        const float fov_rad = fov_deg * M_PI / 180.0f;
-        const float start_angle = -fov_rad / 2.0f;
-        const float end_angle   =  fov_rad / 2.0f;
-        const int vertical_steps = 50;
+    const float fov_rad = fov_deg * M_PI / 180.0f;
+    const float start_angle = -fov_rad / 2.0f;
+    const float end_angle   =  fov_rad / 2.0f;
+    const int vertical_steps = 50;
 
-        for (int i = 0; i < slices; ++i)
-        {
-            float angle = start_angle + (end_angle - start_angle) * i / (slices - 1);
-            
+    for (int i = 0; i < slices; ++i) {
+        float angle = start_angle + (end_angle - start_angle) * i / (slices - 1);
 
-            for (int k = 0; k <= vertical_steps; ++k)
-            {
-                float z = height * k / vertical_steps;
-                float r = radius * (1.0f - z / height);
+        for (int k = 0; k <= vertical_steps; ++k) {
+            float z = height * k / vertical_steps;
+            float r = radius * (1.0f - z / height);
 
-                pcl::PointXYZ p;
-                p.x = r * cos(angle);
-                p.y = r * sin(angle);
+            pcl::PointXYZ p;
+            p.x = r * cos(angle);
+            p.y = r * sin(angle); 
+            p.z = z;
 
-                //sposta leggermente lungo Y in base a Z,
-                //così non esistono colonne perfettamente verticali
-                p.y += slope_eps * z;
-
-                p.z = z;
-                model->points.push_back(p);
-            }
+            model->points.push_back(p);
         }
-
-        model->width = static_cast<uint32_t>(model->points.size());
-        model->height = 1;
-        model->is_dense = true;
-        return model;
     }
+
+    model->width = static_cast<uint32_t>(model->points.size());
+    model->height = 1;
+    model->is_dense = true;
+    return model;
+    }
+
 
     bool isConeICP(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cluster, double max_corresp, double score_threshold, double base_radius){
         if (cluster->empty()) return false;
@@ -476,7 +467,7 @@
         if (!icp.hasConverged())
             return false;
 
-        double score = icp.getFitnessScore(); //media distanze^2
+        double score = icp.getFitnessScore();
         cout <<"ICP fitness score: " <<score <<endl;
 
         return score < score_threshold;
@@ -510,7 +501,6 @@
         std::vector<Eigen::Vector3f> ordered;
         if (pts.empty()) return;
 
-        //trova indice di partenza: min distanza dall'origine
         int start_idx = 0;
         float best_d = numeric_limits<float>::max();
 
@@ -530,7 +520,7 @@
             
             for (size_t j = 0; j < pts.size(); ++j) {
                 if (used[j]) continue;
-                float d = (pts[j] - pts[current]).head<2>().squaredNorm(); //distanza XY
+                float d = (pts[j] - pts[current]).head<2>().squaredNorm();
                 if (d < best){ best = d; idx = j; }
             }
             
