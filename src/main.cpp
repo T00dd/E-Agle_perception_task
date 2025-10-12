@@ -72,10 +72,13 @@
         //FILTRO OUTLIER REMOVAL
         pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         filtered_cloud = filter_outlier_removal(no_planes, 20, 1);
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr vox_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        vox_cloud = downsampling_voxelgrid(filtered_cloud, 0.03f);
         
         //visualizzazione nuvola dopo pipline
         pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without planes"));
-        viewer_no_floor->addPointCloud<pcl::PointXYZ>(filtered_cloud, "clean cloud");
+        viewer_no_floor->addPointCloud<pcl::PointXYZ>(vox_cloud, "clean cloud");
         viewer_no_floor->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2.5, "clean cloud");
         viewer_no_floor->setCameraPosition(
         -5, 0, 0,    
@@ -85,7 +88,7 @@
         
         //DIVISIONE CLUSTER
         vector<pcl::PointIndices> cluster_vector;
-        cluster_extraction(cluster_vector, filtered_cloud, 0.15, 15, 2000);
+        cluster_extraction(cluster_vector, vox_cloud, 0.15, 15, 2000);
 
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
@@ -101,7 +104,7 @@
             pcl::PointCloud<pcl::PointXYZ>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZ>);
             cluster->reserve(cluster_vector[i].indices.size());
             for (int idx : cluster_vector[i].indices)
-                cluster->points.push_back(filtered_cloud->points[idx]);
+                cluster->points.push_back(vox_cloud->points[idx]);
 
             cluster->width = cluster->points.size();
             cluster->height = 1;
@@ -118,7 +121,7 @@
             }
 
             //scarto cluster troppo piccoli
-            if (cluster->size() < 20){
+            if (cluster->size() < 15){
                 #pragma omp critical
                 {
                     for (const auto &p : cluster->points){
