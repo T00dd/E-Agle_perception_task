@@ -17,6 +17,7 @@
 
     using namespace std;
 
+    
     pcl::PointCloud<pcl::PointXYZ>::Ptr filter_z_axes(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, float min_z, float max_z);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr filter_planes(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_unfiltered, int num_planes, float distant_threshold);
@@ -31,9 +32,9 @@
 
     bool isConeICP(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cluster, double max_corresp, double score_threshold, double base_radius);
 
-    void odometry(const pcl::PointCloud<pcl::PointXYZ>::Ptr &first, const pcl::PointCloud<pcl::PointXYZ>::Ptr &second, int max_iteration, float max_correspond_distance);
+    void odometry(const pcl::PointCloud<pcl::PointXYZ>::Ptr &first, const pcl::PointCloud<pcl::PointXYZ>::Ptr &seczond, int max_iteration, float max_correspond_distance);
 
-    void order_by_nn(std::vector<Eigen::Vector3f> &pts); 
+    void order_by_nn(std::vector<Eigen::Vector3f> &pts);
 
     int main() {
         
@@ -52,14 +53,14 @@
         pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
         viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, "sample cloud");
         
-        pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(raw_cloud, "z");
+        /*pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(raw_cloud, "z");
         viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, color_handler, "cloud_z");
         viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud_z");
         viewer->setCameraPosition(
         -5, 0, 0,     
         0, 0, 0,     
         0, 0, 1      
-        );
+        );*/
 
         //FILTRO ASSE Z
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_z(new pcl::PointCloud<pcl::PointXYZ>);
@@ -77,14 +78,14 @@
         vox_cloud = downsampling_voxelgrid(filtered_cloud, 0.03f);
         
         //visualizzazione nuvola dopo pipline
-        pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without planes"));
+        /*pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without planes"));
         viewer_no_floor->addPointCloud<pcl::PointXYZ>(vox_cloud, "clean cloud");
         viewer_no_floor->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2.5, "clean cloud");
         viewer_no_floor->setCameraPosition(
         -5, 0, 0,    
         0, 0, 0,     
         0, 0, 1     
-        );
+        );*/
         
         //DIVISIONE CLUSTER
         vector<pcl::PointIndices> cluster_vector;
@@ -194,14 +195,14 @@
         colored_final_cloud->is_dense = true;
 
         //visualizzazione nuvola finale con verdi i coni e rossi gli ostacoli
-        pcl::visualization::PCLVisualizer::Ptr cone_viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
+        /*pcl::visualization::PCLVisualizer::Ptr cone_viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
         cone_viewer->addPointCloud<pcl::PointXYZRGB>(colored_final_cloud, "sample cloud");
         cone_viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2.5, "sample cloud");
         cone_viewer->setCameraPosition(
         -5, 0, 0,     
         0, 0, 0,     
         0, 0, 1      
-        );
+        );*/
 
         std::cout <<"DEBUG: total cone_centers = " << cone_centers.size() << std::endl;
         for (size_t i = 0; i < cone_centers.size(); ++i) {
@@ -223,21 +224,26 @@
             }
         }
 
-        order_by_nn(left_cones);
-        order_by_nn(right_cones);
+
+        //COSE COMMENTATE PER TESTARE LA PIPELINE PER RICONOSCIMENTO DI CONI. IN CASO IMPLEMENTARE DOPO
+        //COMMENTATI ANCHE TUTTI I VISUALIZER
+
+
+        //order_by_nn(left_cones);
+        //order_by_nn(right_cones);
 
         //visualizzatore percorso
-        pcl::visualization::PCLVisualizer::Ptr track_viewer(new pcl::visualization::PCLVisualizer("Track Viewer"));
+        /*pcl::visualization::PCLVisualizer::Ptr track_viewer(new pcl::visualization::PCLVisualizer("Track Viewer"));
         track_viewer->setBackgroundColor(0, 0, 0);
         track_viewer->addCoordinateSystem(1.0);   
         track_viewer->setCameraPosition(
         -5, 0, 0,     
         0, 0, 0,     
         0, 0, 1      
-        );
+        );*/
 
         //bordo destra del tracciato -> VERDE
-        for (size_t i = 0; i < right_cones.size(); ++i){
+        /*for (size_t i = 0; i < right_cones.size(); ++i){
             pcl::PointXYZ center(right_cones[i].x(), right_cones[i].y(), right_cones[i].z());
             string sph_id = "track_right_sphere_" + to_string(i);
             track_viewer->addSphere(center, 0.03, 1, 1, 0, sph_id);
@@ -248,10 +254,10 @@
                 string line_id = "track_right_line_" + to_string(i);
                 track_viewer->addLine(a, b, 0, 1, 0, line_id);
             }
-        }
+        }*/
 
         //bordo sinistra del tracciato -> AZZURRO
-        for (size_t i = 0; i < left_cones.size(); ++i){
+        /*for (size_t i = 0; i < left_cones.size(); ++i){
             pcl::PointXYZ center(left_cones[i].x(), left_cones[i].y(), left_cones[i].z());
             string sph_id = "track_left_sphere_" + to_string(i);
             track_viewer->addSphere(center, 0.03, 1, 1, 0, sph_id);
@@ -262,11 +268,11 @@
                 string line_id = "track_left_line_" + to_string(i);
                 track_viewer->addLine(a, b, 0, 1, 0, line_id);
             }
-        }
+        }*/
 
         //ODOMETRY
 
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1(new pcl::PointCloud<pcl::PointXYZ>);
+        /*pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud2(new pcl::PointCloud<pcl::PointXYZ>);
 
         if (pcl::io::loadPCDFile<pcl::PointXYZ>("../data/first.pcd", *cloud1) == -1 || pcl::io::loadPCDFile<pcl::PointXYZ>("../data/second.pcd", *cloud2) == -1){
@@ -298,15 +304,16 @@
         cloud1_downsampled = downsampling_voxelgrid(cloud1_outlier_rem, 0.05f);
         cloud2_downsampled = downsampling_voxelgrid(cloud2_outlier_rem, 0.05f);
 
-        odometry(cloud1_downsampled, cloud2_downsampled, 50, 1);
+        odometry(cloud1_downsampled, cloud2_downsampled, 3, 1);
+        */
 
         //visualizzazione delle nuvole
-        while (!track_viewer->wasStopped() && !viewer->wasStopped() && !viewer_no_floor->wasStopped() && !cone_viewer->wasStopped()){
+        /*while (!track_viewer->wasStopped() && !viewer->wasStopped() && !viewer_no_floor->wasStopped() && !cone_viewer->wasStopped()){
             viewer->spinOnce(100);
             track_viewer->spinOnce(100);
             viewer_no_floor->spinOnce(100);
             cone_viewer->spinOnce(100);
-        }
+        }*/
 
         return 0;
     }
