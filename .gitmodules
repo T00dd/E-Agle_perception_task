@@ -1,0 +1,3 @@
+[submodule "as-serializers"]
+	path = as-serializers
+	url = git@github.com:eagletrt/as-serializers.git

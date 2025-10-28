@@ -15,6 +15,13 @@
     #include <omp.h>
     #include <vector>
 
+    #include <zmq.hpp>
+    #include <cstring>
+    #include <thread>
+    #include <chrono>
+
+    #include "as-serializers/Lidar.h"
+
     using namespace std;
 
     
@@ -32,7 +39,7 @@
 
     bool isConeICP(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cluster, double max_corresp, double score_threshold, double base_radius);
 
-    void odometry(const pcl::PointCloud<pcl::PointXYZ>::Ptr &first, const pcl::PointCloud<pcl::PointXYZ>::Ptr &seczond, int max_iteration, float max_correspond_distance);
+    void odometry(const pcl::PointCloud<pcl::PointXYZ>::Ptr &first, const pcl::PointCloud<pcl::PointXYZ>::Ptr &second, int max_iteration, float max_correspond_distance);
 
     void order_by_nn(std::vector<Eigen::Vector3f> &pts);
 
@@ -40,20 +47,161 @@
         
         cout <<"Numero di thread disponibili: " <<omp_get_max_threads() <<endl;
 
-        //visualizzazione cones.pcd
-        pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        zmq::context_t context(1);
+        zmq::socket_t socket(context, zmq::socket_type::sub);
+        socket.connect("tcp://localhost:5555");  // Match sender
+        const string topic = "lidar_integrated";
+        socket.set(zmq::sockopt::subscribe, topic);
+        cout<<"ZMQ initialized, subscribed to topic: " <<topic <<endl;
 
-        if (pcl::io::loadPCDFile<pcl::PointXYZ>("../data/cones.pcd", *raw_cloud) == -1) {
-            PCL_ERROR("File mancante o formato file sbagliato\n");
-            return -1;
+        int frame_id;
+
+        while(true){
+            zmq::message_t msg;
+            if (!socket.recv(msg, zmq::recv_flags::none)) continue;
+            std::string topic_received(static_cast<char*>(msg.data()), msg.size());
+
+            if (!socket.recv(msg, zmq::recv_flags::none)) continue;
+            int64_t timestamp;
+            memcpy(&timestamp, msg.data(), sizeof(timestamp));
+
+            if (socket.recv(msg, zmq::recv_flags::none)) continue;
+            std::string serialized(static_cast<char*>(msg.data()), msg.size());
+
+            pcl::PointCloud<pcl::PointXYZI>::Ptr cloudI(new pcl::PointCloud<pcl::PointXYZI>());
+            deserializeFromProto(serialized, cloudI);
+
+            pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+            for (const auto &p : cloudI->points){
+                raw_cloud->push_back(pcl::PointXYZ(p.x, p.y, p.z));
+            }
+
+            cout<<"Recived frame: " <<raw_cloud->size() <<" points\n";
+
+            auto cloud_z = filter_z_axes(raw_cloud, -1, 1);
+            auto no_planes = filter_planes(cloud_z, 1, 0.05);
+            auto filtered_cloud = filter_outlier_removal(no_planes, 20, 1);
+            auto vox_cloud = downsampling_voxelgrid(filtered_cloud, 0.03f);
+            
+            vector<pcl::PointIndices> cluster_vector;
+            cluster_extraction(cluster_vector, vox_cloud, 0.15, 15, 2000);
+
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+            std::vector<Eigen::Vector3f> cone_centers;
+
+            #pragma omp parallel for
+            for(int i = 0; i<cluster_vector.size(); i++){
+
+                //prendo i cluster e li metto in una nuvola
+                pcl::PointCloud<pcl::PointXYZ>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZ>);
+                cluster->reserve(cluster_vector[i].indices.size());
+                for (int idx : cluster_vector[i].indices)
+                    cluster->points.push_back(vox_cloud->points[idx]);
+
+                cluster->width = cluster->points.size();
+                cluster->height = 1;
+                cluster->is_dense = true;
+
+                pcl::PointCloud<pcl::PointXYZ> cluster_clean;
+                std::vector<int> valid_indices;
+                pcl::removeNaNFromPointCloud(*cluster, cluster_clean, valid_indices);
+                *cluster = cluster_clean;
+
+                // #pragma omp critical
+                // {
+                //     cout <<"Cluster #" <<i <<" -> punti: " <<cluster->size() <<endl;
+                // }
+
+                //scarto cluster troppo piccoli
+                if (cluster->size() < 15) continue;
+                // {
+                //     #pragma omp critical
+                //     {
+                //         for (const auto &p : cluster->points){
+                //         pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
+                //         colored_final_cloud->points.push_back(q);
+                //         }
+                //         cout<<"Cluster #" <<i <<" scartato: pochi punti\n";
+                //     }
+                //     continue;
+                // }
+            
+
+                //calcolo bounding box
+                pcl::PointXYZ min_pt, max_pt;
+                pcl::getMinMax3D(*cluster, min_pt, max_pt);
+
+                float height = max_pt.z - min_pt.z;
+                float base_radius = std::max(max_pt.x - min_pt.x, max_pt.y - min_pt.y) * 0.5f;
+
+                //controllo altezza e posizione del cluster (scarto quelli irrealistici)
+                if (height <= 0.0f || base_radius <= 0.0f || height > 0.3f || min_pt.z > -0.3f) continue;
+                // {
+                //     #pragma omp critical
+                //     {
+                //         for (const auto &p : cluster->points){
+                //             pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
+                //             colored_final_cloud->points.push_back(q);
+                //         }
+                //         cout<<"Cluster #" <<i <<" scartato: posizione o altezza irrealistici\n";                    
+                //     }
+                //     continue;
+                // }
+
+                float maxCorrDist = 0.03;
+                double score_threshold = 0.01;  
+
+                if (isConeICP(cluster, maxCorrDist, score_threshold, base_radius)) {
+                    Eigen::Vector4f c; 
+                    pcl::compute3DCentroid(*cluster, c);
+                    cone_centers.emplace_back(c[0], c[1], c[2]);
+                    //coloro il cluster di azzurro se è un cono
+                    #pragma omp critical
+                    {
+                        for (const auto &p : cluster->points) {
+                            pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                            q.r = 0; q.g = 200; q.b = 255;
+                            colored_final_cloud->points.push_back(q);
+                        }
+                    }
+                    
+
+                }
+                // else{
+
+                //     #pragma omp critical
+                //     {
+                //         for (const auto &p : cluster->points) {
+                //             pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+                //             q.r = 255; q.g = 0; q.b = 0;
+                //             colored_final_cloud->points.push_back(q);
+                //         }
+                //         cout<<"Cluster #" <<i <<" scartato: non è un cono\n";
+                //     }
+                // }
+            }
+
+            cout<<"Trovati " <<cone_centers.size() <<" coni nel frame #" <<frame_id <<endl;
+            frame_id++;
+
         }
 
-        cout <<"Nuvola caricata: " <<raw_cloud->width * raw_cloud->height <<" punti." <<endl;
+        socket.close();
+        //visualizzazione cones.pcd
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
-        pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
+        // if (pcl::io::loadPCDFile<pcl::PointXYZ>("../data/cones.pcd", *raw_cloud) == -1) {
+        //     PCL_ERROR("File mancante o formato file sbagliato\n");
+        //     return -1;
+        // }
+
+        // cout <<"Nuvola caricata: " <<raw_cloud->width * raw_cloud->height <<" punti." <<endl;
+
+        /*pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
         viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, "sample cloud");
         
-        /*pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(raw_cloud, "z");
+        pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> color_handler(raw_cloud, "z");
         viewer->addPointCloud<pcl::PointXYZ>(raw_cloud, color_handler, "cloud_z");
         viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud_z");
         viewer->setCameraPosition(
@@ -63,19 +211,19 @@
         );*/
 
         //FILTRO ASSE Z
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_z(new pcl::PointCloud<pcl::PointXYZ>);
-        cloud_z = filter_z_axes(raw_cloud, -1, 1);
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_z(new pcl::PointCloud<pcl::PointXYZ>);
+        // cloud_z = filter_z_axes(raw_cloud, -1, 1);
 
-        //RIMOZIONE PIANI (pavimento e muro) per evitare errori nel clustering e classificazione
-        pcl::PointCloud<pcl::PointXYZ>::Ptr no_planes(new pcl::PointCloud<pcl::PointXYZ>);
-        no_planes = filter_planes(cloud_z, 2, 0.05);
+        // //RIMOZIONE PIANI (pavimento e muro) per evitare errori nel clustering e classificazione
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr no_planes(new pcl::PointCloud<pcl::PointXYZ>);
+        // no_planes = filter_planes(cloud_z, 2, 0.05);
 
-        //FILTRO OUTLIER REMOVAL
-        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-        filtered_cloud = filter_outlier_removal(no_planes, 20, 1);
+        // //FILTRO OUTLIER REMOVAL
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        // filtered_cloud = filter_outlier_removal(no_planes, 20, 1);
 
-        pcl::PointCloud<pcl::PointXYZ>::Ptr vox_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-        vox_cloud = downsampling_voxelgrid(filtered_cloud, 0.03f);
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr vox_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        // vox_cloud = downsampling_voxelgrid(filtered_cloud, 0.03f);
         
         //visualizzazione nuvola dopo pipline
         /*pcl::visualization::PCLVisualizer::Ptr viewer_no_floor(new pcl::visualization::PCLVisualizer("Cloud without planes"));
@@ -88,111 +236,115 @@
         );*/
         
         //DIVISIONE CLUSTER
-        vector<pcl::PointIndices> cluster_vector;
-        cluster_extraction(cluster_vector, vox_cloud, 0.15, 15, 2000);
+        // vector<pcl::PointIndices> cluster_vector;
+        // cluster_extraction(cluster_vector, vox_cloud, 0.15, 15, 2000);
 
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+        // pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_final_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
         //CLASSIFICAZIONE CLUSTER
 
         //vettore per salvare i centroidi dei coni rilevati
-        vector<Eigen::Vector3f> cone_centers;
+        // vector<Eigen::Vector3f> cone_centers;
 
-        #pragma omp parallel for
-        for(int i = 0; i<cluster_vector.size(); i++){
+        // #pragma omp parallel for
+        // for(int i = 0; i<cluster_vector.size(); i++){
 
-            //prendo i cluster e li metto in una nuvola
-            pcl::PointCloud<pcl::PointXYZ>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZ>);
-            cluster->reserve(cluster_vector[i].indices.size());
-            for (int idx : cluster_vector[i].indices)
-                cluster->points.push_back(vox_cloud->points[idx]);
+        //     //prendo i cluster e li metto in una nuvola
+        //     pcl::PointCloud<pcl::PointXYZ>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZ>);
+        //     cluster->reserve(cluster_vector[i].indices.size());
+        //     for (int idx : cluster_vector[i].indices)
+        //         cluster->points.push_back(vox_cloud->points[idx]);
 
-            cluster->width = cluster->points.size();
-            cluster->height = 1;
-            cluster->is_dense = true;
+        //     cluster->width = cluster->points.size();
+        //     cluster->height = 1;
+        //     cluster->is_dense = true;
 
-            pcl::PointCloud<pcl::PointXYZ> cluster_clean;
-            std::vector<int> valid_indices;
-            pcl::removeNaNFromPointCloud(*cluster, cluster_clean, valid_indices);
-            *cluster = cluster_clean;
+        //     pcl::PointCloud<pcl::PointXYZ> cluster_clean;
+        //     std::vector<int> valid_indices;
+        //     pcl::removeNaNFromPointCloud(*cluster, cluster_clean, valid_indices);
+        //     *cluster = cluster_clean;
 
-            #pragma omp critical
-            {
-                cout <<"Cluster #" <<i <<" -> punti: " <<cluster->size() <<endl;
-            }
+        //     #pragma omp critical
+        //     {
+        //         cout <<"Cluster #" <<i <<" -> punti: " <<cluster->size() <<endl;
+        //     }
 
-            //scarto cluster troppo piccoli
-            if (cluster->size() < 15){
-                #pragma omp critical
-                {
-                    for (const auto &p : cluster->points){
-                    pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
-                    colored_final_cloud->points.push_back(q);
-                    }
-                    cout<<"Cluster #" <<i <<" scartato: pochi punti\n";
-                }
-                continue;
-            }
+        //     //scarto cluster troppo piccoli
+        //     if (cluster->size() < 15){
+        //         #pragma omp critical
+        //         {
+        //             for (const auto &p : cluster->points){
+        //             pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
+        //             colored_final_cloud->points.push_back(q);
+        //             }
+        //             cout<<"Cluster #" <<i <<" scartato: pochi punti\n";
+        //         }
+        //         continue;
+        //     }
            
 
-            //calcolo bounding box
-            pcl::PointXYZ min_pt, max_pt;
-            pcl::getMinMax3D(*cluster, min_pt, max_pt);
+        //     //calcolo bounding box
+        //     pcl::PointXYZ min_pt, max_pt;
+        //     pcl::getMinMax3D(*cluster, min_pt, max_pt);
 
-            float height = max_pt.z - min_pt.z;
-            float base_radius = std::max(max_pt.x - min_pt.x, max_pt.y - min_pt.y) * 0.5f;
+        //     float height = max_pt.z - min_pt.z;
+        //     float base_radius = std::max(max_pt.x - min_pt.x, max_pt.y - min_pt.y) * 0.5f;
 
-            //controllo altezza e posizione del cluster (scarto quelli irrealistici)
-            if (height <= 0.0f || base_radius <= 0.0f || height > 0.3f || min_pt.z > -0.3f){
-                #pragma omp critical
-                {
-                    for (const auto &p : cluster->points){
-                        pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
-                        colored_final_cloud->points.push_back(q);
-                    }
-                    cout<<"Cluster #" <<i <<" scartato: posizione o altezza irrealistici\n";                    
-                }
-                continue;
-            }
+        //     //controllo altezza e posizione del cluster (scarto quelli irrealistici)
+        //     if (height <= 0.0f || base_radius <= 0.0f || height > 0.3f || min_pt.z > -0.3f){
+        //         #pragma omp critical
+        //         {
+        //             for (const auto &p : cluster->points){
+        //                 pcl::PointXYZRGB q{p.x, p.y, p.z, 255, 0, 0};
+        //                 colored_final_cloud->points.push_back(q);
+        //             }
+        //             cout<<"Cluster #" <<i <<" scartato: posizione o altezza irrealistici\n";                    
+        //         }
+        //         continue;
+        //     }
 
-            float maxCorrDist = 0.03;
-            double score_threshold = 0.01;
+        //     float maxCorrDist = 0.03;
+        //     double score_threshold = 0.01;
 
-            bool is_cone = isConeICP(cluster, maxCorrDist, score_threshold, base_radius); 
+        //     bool is_cone = isConeICP(cluster, maxCorrDist, score_threshold, base_radius); 
 
-            if (is_cone) {
-                Eigen::Vector4f c; 
-                pcl::compute3DCentroid(*cluster, c);
+        //     if (is_cone) {
+        //         Eigen::Vector4f c; 
+        //         pcl::compute3DCentroid(*cluster, c);
 
-                //coloro il cluster di azzurro se è un cono
-                #pragma omp critical
-                {
-                    for (const auto &p : cluster->points) {
-                        pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
-                        q.r = 0; q.g = 200; q.b = 255;
-                        colored_final_cloud->points.push_back(q);
-                    }
-                    cone_centers.emplace_back(c[0], c[1], c[2]);
-                }
+        //         //coloro il cluster di azzurro se è un cono
+        //         #pragma omp critical
+        //         {
+        //             for (const auto &p : cluster->points) {
+        //                 pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+        //                 q.r = 0; q.g = 200; q.b = 255;
+        //                 colored_final_cloud->points.push_back(q);
+        //             }
+        //             cone_centers.emplace_back(c[0], c[1], c[2]);
+        //         }
                 
 
-            }else{
+        //     }else{
 
-                #pragma omp critical
-                {
-                    for (const auto &p : cluster->points) {
-                        pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
-                        q.r = 255; q.g = 0; q.b = 0;
-                        colored_final_cloud->points.push_back(q);
-                    }
-                    cout<<"Cluster #" <<i <<" scartato: non è un cono\n";
-                }
-            }
-        }
+        //         #pragma omp critical
+        //         {
+        //             for (const auto &p : cluster->points) {
+        //                 pcl::PointXYZRGB q; q.x = p.x; q.y = p.y; q.z = p.z;
+        //                 q.r = 255; q.g = 0; q.b = 0;
+        //                 colored_final_cloud->points.push_back(q);
+        //             }
+        //             cout<<"Cluster #" <<i <<" scartato: non è un cono\n";
+        //         }
+        //     }
+        // }
 
-        colored_final_cloud->width = colored_final_cloud->points.size();
-        colored_final_cloud->height = 1;
-        colored_final_cloud->is_dense = true;
+        // colored_final_cloud->width = colored_final_cloud->points.size();
+        // colored_final_cloud->height = 1;
+        // colored_final_cloud->is_dense = true;
+
+        //COSE COMMENTATE PER TESTARE LA PIPELINE PER RICONOSCIMENTO DI CONI. IN CASO IMPLEMENTARE DOPO
+        //COMMENTATI ANCHE TUTTI I VISUALIZER
+
 
         //visualizzazione nuvola finale con verdi i coni e rossi gli ostacoli
         /*pcl::visualization::PCLVisualizer::Ptr cone_viewer(new pcl::visualization::PCLVisualizer("Visualizzatore PCL raw"));
@@ -204,30 +356,28 @@
         0, 0, 1      
         );*/
 
-        std::cout <<"DEBUG: total cone_centers = " << cone_centers.size() << std::endl;
-        for (size_t i = 0; i < cone_centers.size(); ++i) {
-            std::cout << "  cone[" << i << "] = (" 
-                    << cone_centers[i].x() << ", "
-                    << cone_centers[i].y() << ", "
-                    << cone_centers[i].z() << ")\n";
-        }
+        // std::cout <<"DEBUG: total cone_centers = " << cone_centers.size() << std::endl;
+        // for (size_t i = 0; i < cone_centers.size(); ++i) {
+        //     std::cout << "  cone[" << i << "] = (" 
+        //             << cone_centers[i].x() << ", "
+        //             << cone_centers[i].y() << ", "
+        //             << cone_centers[i].z() << ")\n";
+        // }
 
-        //costruzione percorso (nearest-neighbor ordering)
-        vector<Eigen::Vector3f> right_cones;
-        vector<Eigen::Vector3f> left_cones;
+        // //costruzione percorso (nearest-neighbor ordering)
+        // vector<Eigen::Vector3f> right_cones;
+        // vector<Eigen::Vector3f> left_cones;
 
-        for(const auto &c : cone_centers){
-            if(c.y() <= 0){
-                right_cones.push_back(c);
-            }else{
-                left_cones.push_back(c);
-            }
-        }
+        // for(const auto &c : cone_centers){
+        //     if(c.y() <= 0){
+        //         right_cones.push_back(c);
+        //     }else{
+        //         left_cones.push_back(c);
+        //     }
+        // }
 
 
-        //COSE COMMENTATE PER TESTARE LA PIPELINE PER RICONOSCIMENTO DI CONI. IN CASO IMPLEMENTARE DOPO
-        //COMMENTATI ANCHE TUTTI I VISUALIZER
-
+        
 
         //order_by_nn(left_cones);
         //order_by_nn(right_cones);
@@ -389,7 +539,7 @@
         vg.setLeafSize(leaf_size, leaf_size, leaf_size);
         vg.filter(*filtered);
 
-        cout<<"PointCloud dopo il filtraggio: " <<filtered->size() <<" punti.\n";
+        //cout<<"PointCloud dopo il filtraggio: " <<filtered->size() <<" punti.\n";
 
         return filtered;
     }
@@ -408,7 +558,7 @@
         ec.setInputCloud(cloud);
         ec.extract(cluster_vector);
 
-        cout<<"Cluster trovati: " <<cluster_vector.size() <<endl;
+        //cout<<"Cluster trovati: " <<cluster_vector.size() <<endl;
     }
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr makeConeModel(float height, float radius, int slices) {
